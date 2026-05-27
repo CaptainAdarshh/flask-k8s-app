@@ -10,25 +10,21 @@ REDIS_HOST = os.environ.get('REDIS_HOST', 'redis-service')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
 
 def get_redis_connection():
-    """Creates a connection to Redis database"""
+    
     return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, socket_connect_timeout=2)
 
 @app.route('/')
 def home():
-    """Main endpoint - just says hello"""
+    
     return jsonify({
-        "message": "Hello from Flask running on Kubernetes!",
+        "message": "Hello from Flask v2 on Kubernetes!",
         "status": "running",
         "redis_host": REDIS_HOST
     })
 
 @app.route('/health')
 def health():
-    """
-    Health check endpoint.
-    Kubernetes uses this to know if the app is working properly.
-    If this returns an error, Kubernetes will restart the container.
-    """
+    
     try:
         r = get_redis_connection()
         r.ping()  
@@ -44,7 +40,7 @@ def health():
 
 @app.route('/count')
 def count():
-    """Counts how many times this page was visited, stored in Redis"""
+    
     try:
         r = get_redis_connection()
         visits = r.incr('page_visits')  
