@@ -1,0 +1,90 @@
+name: Build and Deploy to Kubernetes
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ${{ github.sha }} is the unique ID of this code commit - used as image version
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/flask-k8s-app:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/flask-k8s-app:${{ github.sha }}
+
+      - name: Start Minikube
+        uses: medyagh/setup-minikube@master
+
+      - name: Update deployment with correct image
+        run: |
+          sed -i "s|YOUR_DOCKERHUB_USERNAME/flask-k8s-app:latest|${{ secrets.DOCKERHUB_USERNAME }}/flask-k8s-app:${{ github.sha }}|g" k8s/flask-deployment.yaml
+          echo "Updated deployment file:"
+          grep "image:" k8s/flask-deployment.yaml
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f k8s/redis-deployment.yaml
+          kubectl apply -f k8s/redis-service.yaml
+          kubectl apply -f k8s/flask-deployment.yaml
+          kubectl apply -f k8s/flask-service.yaml
+
+      - name: Wait for deployments to be ready
+        run: |
+          echo "Waiting for Redis to start..."
+          kubectl rollout status deployment/redis --timeout=120s
+          echo "Waiting for Flask app to start..."
+          kubectl rollout status deployment/flask-app --timeout=120s
+
+      - name: Show Kubernetes resources
+        run: |
+          echo "========== PODS =========="
+          kubectl get pods -o wide
+          echo ""
+          echo "========== SERVICES =========="
+          kubectl get services
+          echo ""
+          echo "========== DEPLOYMENTS =========="
+          kubectl get deployments
+          echo ""
+          echo "========== POD DETAILS =========="
+          kubectl describe pods -l app=flask-app | grep -A5 "Readiness\|Liveness\|Ready\|State"
+
+      - name: Test the application
+        run: |
+          # Get the URL of the Flask service
+          FLASK_URL=$(minikube service flask-service --url)
+          echo "Application URL: $FLASK_URL"
+
+          # Wait a few seconds for probes to pass
+          sleep 15
+
+          echo "--- Testing / endpoint ---"
+          curl -s $FLASK_URL/ | python3 -m json.tool
+
+          echo "--- Testing /health endpoint ---"
+          curl -s $FLASK_URL/health | python3 -m json.tool
+
+          echo "--- Testing /count endpoint ---"
+          curl -s $FLASK_URL/count | python3 -m json.tool
+          curl -s $FLASK_URL/count | python3 -m json.tool
+
+          echo "SUCCESS: Application is working correctly!"
